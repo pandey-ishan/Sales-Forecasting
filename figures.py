@@ -15,12 +15,13 @@ import data_utils as du
 import geo
 
 # ---- theme -------------------------------------------------------------------------------
-ORANGE, CYAN, GREEN, PURPLE = "#ff8c00", "#4cc9f0", "#9be564", "#c77dff"
-RED, YELLOW, GREY, TEXT = "#ff5d73", "#ffd166", "#8c8c8c", "#e8e8e8"
-PANEL, GRID = "#151515", "#2b2b2b"
+ORANGE, CYAN, GREEN, PURPLE = "#F96E2A", "#78B3CE", "#3a8f6e", "#7a5ea8"
+RED, YELLOW, GREY, TEXT = "#c0392b", "#d49a00", "#8a9aa3", "#1f3340"
+PANEL, GRID = "#ffffff", "#e3edf1"
 WAY = [ORANGE, CYAN, GREEN, PURPLE, RED, YELLOW, "#06d6a0", "#8d99ae"]
-SCALE = [[0, "#2a1500"], [0.5, "#b85f00"], [1, "#ffb347"]]
-DIVERGING = [[0, CYAN], [0.5, "#1b1b1b"], [1, ORANGE]]
+SCALE = [[0, "#FBF8EF"], [0.5, "#fbb089"], [1, "#F96E2A"]]
+MAP_SCALE = [[0, "#f9a273"], [0.5, "#e0561a"], [1, "#7a2606"]]  # darker than SCALE so bubbles stand out on the blue land
+DIVERGING = [[0, "#3f86a8"], [0.5, "#FBF8EF"], [1, ORANGE]]
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 MODEL_COLORS = {"SARIMA": ORANGE, "XGBoost": CYAN, "SARIMA + XGBoost": GREEN}
@@ -28,7 +29,7 @@ MODEL_COLORS = {"SARIMA": ORANGE, "XGBoost": CYAN, "SARIMA + XGBoost": GREEN}
 
 def style(fig: go.Figure, title: str | None = None, height: int = 380) -> go.Figure:
     fig.update_layout(
-        template="plotly_dark", paper_bgcolor=PANEL, plot_bgcolor=PANEL, colorway=WAY, height=height,
+        template="plotly_white", paper_bgcolor=PANEL, plot_bgcolor=PANEL, colorway=WAY, height=height,
         font=dict(color=TEXT, size=12), title_text=title or "", title_x=0.01, title_y=0.97, title_yanchor="top",
         title_font_size=15,
         # room above the plot for the legend (which wraps to 2-3 rows) and, if present, the title above it
@@ -277,10 +278,10 @@ def geo_figs(df, level, metric, coords):
         lat=placed["lat"], lon=placed["lon"], text=placed["name"], customdata=placed["value"],
         hovertemplate="<b>%{text}</b><br>" + metric + ": %{customdata:,.2f}<extra></extra>",
         marker=dict(size=sizes, sizemode="area", sizeref=sizeref, sizemin=3, color=placed["value"],
-                    colorscale=SCALE, showscale=True, opacity=0.85, line=dict(width=0.5, color="#000"),
+                    colorscale=MAP_SCALE, showscale=True, opacity=0.9, line=dict(width=0.6, color="#1f3340"),
                     colorbar=dict(title=metric, thickness=10, len=0.6))))
-    fig.update_geos(scope="usa", projection_type="albers usa", showland=True, landcolor="#202020",
-                    bgcolor=PANEL, showlakes=False, showsubunits=True, subunitcolor="#4a4a4a")
+    fig.update_geos(scope="usa", projection_type="albers usa", showland=True, landcolor="#9cc3d6",
+                    bgcolor=PANEL, showlakes=False, showsubunits=True, subunitcolor="#4f86a3")
     fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
     style(fig, height=520)
     fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
@@ -367,9 +368,9 @@ def _iso(ts) -> str:
 
 def forecast_fig(r):
     y, p, n_train = r["y"], r["preds"], r["n_train"]
-    tail = y.iloc[max(0, n_train - 90):n_train]
+    train = y.iloc[:n_train]  # the whole training period, so the 70/30 proportions are visible
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=tail.index, y=tail.to_numpy(), name="Train (last 90 days)",
+    fig.add_trace(go.Scatter(x=train.index, y=train.to_numpy(), name="Train (actual)",
                              line=dict(color=GREY, width=1)))
     fig.add_trace(go.Scatter(x=p.index, y=p["Actual"], name="Actual (test)", line=dict(color=TEXT, width=1.4)))
     for m, color in MODEL_COLORS.items():
@@ -379,13 +380,22 @@ def forecast_fig(r):
                              line=dict(color=ORANGE, dash="dot")))
     fig.add_trace(go.Scatter(x=p.index, y=p["Seasonal naive"], name="Seasonal naive", visible="legendonly",
                              line=dict(color=PURPLE, dash="dot")))
-    fig.add_shape(type="line", x0=_iso(r["split_date"]), x1=_iso(r["split_date"]), y0=0, y1=1, yref="paper",
+    # shade the two regions and label them with their real sizes
+    t0, ts, t1 = pd.Timestamp(y.index[0]), pd.Timestamp(r["split_date"]), pd.Timestamp(y.index[-1])
+    n = len(y)
+    for a, b, fill, label in (
+        (t0, ts, "rgba(120,179,206,0.12)", f"TRAIN · {n_train:,} days ({n_train / n:.0%})"),
+        (ts, t1, "rgba(249,110,42,0.08)", f"TEST · {n - n_train:,} days ({(n - n_train) / n:.0%})"),
+    ):
+        fig.add_shape(type="rect", x0=_iso(a), x1=_iso(b), y0=0, y1=1, yref="paper", fillcolor=fill,
+                      line_width=0, layer="below")
+        fig.add_annotation(x=_iso(a + (b - a) / 2), y=0.98, yref="paper", text=label, showarrow=False,
+                           yanchor="top", font=dict(color=GREY if fill.startswith("rgba(120") else ORANGE, size=11))
+    fig.add_shape(type="line", x0=_iso(ts), x1=_iso(ts), y0=0, y1=1, yref="paper",
                   line=dict(color=YELLOW, dash="dash", width=1))
-    fig.add_annotation(x=_iso(r["split_date"]), y=1, yref="paper", text="train | test", showarrow=False,
-                       xanchor="left", yanchor="bottom", font=dict(color=YELLOW, size=11))
     fig.update_layout(yaxis_title="Daily sales", hovermode="x unified")
     fig.update_xaxes(rangeslider_visible=True)
-    style(fig, title="Actual vs predicted on the held-out 30%", height=520)
+    style(fig, title="Train (70%) and held-out test (30%): actual vs predicted", height=520)
     fig.update_layout(margin=dict(l=55, r=20, t=125, b=50))  # 7 legend entries wrap to several rows
     return fig
 
@@ -431,9 +441,188 @@ def future_fig(r):
     fig.add_trace(go.Scatter(
         x=list(fut.index) + list(fut.index[::-1]),
         y=list(fut["SARIMA 95% high"]) + list(fut["SARIMA 95% low"].iloc[::-1]),
-        fill="toself", fillcolor="rgba(255,140,0,0.15)", line=dict(width=0), hoverinfo="skip",
+        fill="toself", fillcolor="rgba(249,110,42,0.15)", line=dict(width=0), hoverinfo="skip",
         name="SARIMA 95% interval"))
     for m, color in MODEL_COLORS.items():
         fig.add_trace(go.Scatter(x=fut.index, y=fut[m], name=m, mode="lines+markers", line=dict(color=color, width=2)))
     fig.update_layout(yaxis_title="Daily sales", hovermode="x unified")
     return style(fig, title=f"Next {len(fut)} days", height=400)
+
+
+NS_FILL = "rgba(120,179,206,0.22)"  # shaded "not significant" band (|r| < 1.96/sqrt(n))
+
+
+def _acf_bars(fig, vals, n, m, row, col, nlags):
+    """Bars for lags 1..nlags with the 95% non-significance region shaded; seasonal lags are yellow."""
+    band = 1.96 / np.sqrt(n)
+    lags = np.arange(1, nlags + 1)
+    v = vals[1:nlags + 1]
+    seasonal = (lags % m == 0) if (m and m > 1) else np.zeros(len(lags), dtype=bool)
+    colors = [YELLOW if sf else (ORANGE if abs(x) > band else GREY) for x, sf in zip(v, seasonal)]
+    fig.add_hrect(y0=-band, y1=band, fillcolor=NS_FILL, line_width=0, layer="below", row=row, col=col)
+    for sgn in (1, -1):
+        fig.add_hline(y=sgn * band, line=dict(color=CYAN, dash="dot", width=1), row=row, col=col)
+    fig.add_trace(go.Bar(x=lags, y=v, marker_color=colors, showlegend=False, width=0.35,
+                         hovertemplate="lag %{x}: %{y:.3f}<extra></extra>"), row=row, col=col)
+    fig.update_xaxes(title_text="lag (days)", row=row, col=col)
+    fig.update_yaxes(range=[-1, 1] if np.abs(v).max() > 0.5 else [-0.6, 0.6], row=row, col=col)
+
+
+def acf_pacf_fig(x, d, D, m, nlags=40):
+    import models  # local import: figures.py otherwise has no model dependency
+
+    n = len(x)
+    nlags = int(max(5, min(nlags, n // 3)))
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("ACF  → suggests q (and Q)", "PACF  → suggests p (and P)"),
+                        horizontal_spacing=0.08)
+    _acf_bars(fig, models.acf(x, nlags), n, m, 1, 1, nlags)
+    _acf_bars(fig, models.pacf(x, nlags), n, m, 1, 2, nlags)
+    desc = f"seasonal diff (lag {m}) ×{int(bool(D))}, regular diff ×{int(d or 0)}, n = {n:,} days"
+    return style(fig, title=f"Training series after pre-processing · {desc} · shaded = not significant", height=360)
+
+
+def rolling_fig(z, window):
+    """Rolling mean (top) and rolling standard deviation (bottom) of the pre-processed training series."""
+    window = int(max(2, min(window, len(z) // 2)))
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                        subplot_titles=(f"Rolling mean ({window} days)", f"Rolling standard deviation ({window} days)"))
+    fig.add_trace(go.Scatter(x=z.index, y=z.to_numpy(), name="Series", line=dict(color=GREY, width=0.8), opacity=0.6),
+                  row=1, col=1)
+    fig.add_trace(go.Scatter(x=z.index, y=z.rolling(window).mean(), name="Rolling mean", line=dict(color=ORANGE, width=2)),
+                  row=1, col=1)
+    fig.add_trace(go.Scatter(x=z.index, y=z.rolling(window).std(), name="Rolling std", line=dict(color=CYAN, width=2)),
+                  row=2, col=1)
+    return style(fig, title="Does the level or the spread drift over time?", height=480)
+
+
+def diff_fig(z, d, D, m):
+    """Original (pre-processed) series above the same series after the chosen differencing."""
+    import models
+
+    x = models.difference(z.to_numpy(), d, D, m)
+    idx = z.index[len(z) - len(x):]
+    label = f"seasonal (lag {m}) ×{int(bool(D))}, regular ×{int(d or 0)}"
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                        subplot_titles=("Original (after log / outlier removal)", f"Differenced: {label}"))
+    fig.add_trace(go.Scatter(x=z.index, y=z.to_numpy(), name="Original", line=dict(color=ORANGE, width=1)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=idx, y=x, name="Differenced", line=dict(color=CYAN, width=1)), row=2, col=1)
+    fig.add_hline(y=0, line=dict(color=GREY, dash="dot", width=1), row=2, col=1)
+    return style(fig, title="Has differencing removed the trend / weekly pattern?", height=480)
+
+
+def periodogram_fig(per, power, peaks, n):
+    fig = go.Figure(go.Scatter(x=per, y=power, mode="lines", line=dict(color=ORANGE, width=1.4), name="Power",
+                               hovertemplate="period %{x:.1f} days<extra></extra>"))
+    for p in (7, 365.25):
+        if p < n:
+            fig.add_vline(x=p, line=dict(color=GREY, dash="dot", width=1))
+    ymax = float(np.max(power)) or 1.0
+    for p in peaks:
+        i = int(np.argmin(np.abs(per - p)))
+        fig.add_annotation(x=np.log10(p), y=float(power[i]), text=f"{p:.1f} d", showarrow=True, arrowhead=0, ay=-24,
+                           font=dict(size=11, color=TEXT))
+    fig.update_xaxes(type="log", title_text="period (days, log scale)", range=[np.log10(2), np.log10(max(n, 10))])
+    fig.update_yaxes(title_text="power", range=[0, ymax * 1.15])
+    return style(fig, title="Periodogram: which cycle lengths carry the most power (dotted: 7 and 365 days)", height=380)
+
+
+def ic_heatmap_fig(res):
+    """AIC and BIC over p (rows) and q (columns) for the chosen d, D, P, Q, m. The best cell is outlined."""
+    g, pmax, qmax = res["grid"], res["pmax"], res["qmax"]
+    P, D, Q, m = res["seasonal"]
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("AIC (lower is better)", "BIC (lower is better)"),
+                        horizontal_spacing=0.1)
+    for col, crit in ((1, "AIC"), (2, "BIC")):
+        z = np.full((pmax + 1, qmax + 1), np.nan)
+        for _, row in g.iterrows():
+            z[int(row["p"]), int(row["q"])] = row[crit]
+        fig.add_trace(go.Heatmap(z=z, x=list(range(qmax + 1)), y=list(range(pmax + 1)), showscale=False,
+                                 colorscale=[[0, "#2f6f90"], [0.5, "#C9E6F0"], [1, "#FBF8EF"]],
+                                 texttemplate="%{z:.0f}", hovertemplate="p=%{y}, q=%{x}: %{z:.1f}<extra></extra>",
+                                 xgap=2, ygap=2), row=1, col=col)
+        if np.isfinite(z).any():
+            bp, bq = np.unravel_index(np.nanargmin(z), z.shape)
+            fig.add_shape(type="rect", x0=bq - 0.5, x1=bq + 0.5, y0=bp - 0.5, y1=bp + 0.5,
+                          line=dict(color=ORANGE, width=3), row=1, col=col)
+        fig.update_xaxes(title_text="q (MA order)", dtick=1, row=1, col=col)
+        fig.update_yaxes(title_text="p (AR order)", dtick=1, autorange="reversed", row=1, col=col)
+    return style(fig, title=f"SARIMA(p, {res['d']}, q)({P}, {D}, {Q}, {m}) · orange outline = best", height=400)
+
+
+def resid_time_fig(resid):
+    sd = float(resid.std()) or 1.0
+    fig = go.Figure(go.Scatter(x=resid.index, y=resid.to_numpy(), mode="lines+markers", name="Residual",
+                               line=dict(color=CYAN, width=0.8), marker=dict(size=3, color=CYAN)))
+    for k in (2, -2):
+        fig.add_hline(y=k * sd, line=dict(color=RED, dash="dot", width=1))
+    fig.add_hline(y=0, line=dict(color=GREY, width=1))
+    fig.update_layout(yaxis_title="standardised residual")
+    return style(fig, title="Residuals over time (should look like noise around 0; dotted = ±2 SD)", height=340)
+
+
+def resid_acf_fig(resid, m):
+    import models
+
+    r = resid.dropna().to_numpy()
+    n = len(r)
+    nlags = int(max(5, min(40, n // 3)))
+    fig = make_subplots(rows=1, cols=1)
+    _acf_bars(fig, models.acf(r, nlags), n, m, 1, 1, nlags)
+    return style(fig, title="Residual ACF (bars inside the shaded band = no autocorrelation left)", height=340)
+
+
+def resid_dist_fig(resid):
+    r = resid.dropna().to_numpy()
+    mu, sd = float(r.mean()), float(r.std()) or 1.0
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("Histogram vs normal", "Q–Q plot"), horizontal_spacing=0.1)
+    fig.add_trace(go.Histogram(x=r, nbinsx=40, histnorm="probability density", marker_color=ORANGE, opacity=0.8,
+                               showlegend=False), row=1, col=1)
+    xs = np.linspace(r.min(), r.max(), 200)
+    fig.add_trace(go.Scatter(x=xs, y=np.exp(-0.5 * ((xs - mu) / sd) ** 2) / (sd * np.sqrt(2 * np.pi)), mode="lines",
+                             name="Normal", line=dict(color=CYAN, width=2), showlegend=False), row=1, col=1)
+    (tq, sq), (slope, icpt, _r) = stats.probplot(r, dist="norm")
+    fig.add_trace(go.Scatter(x=tq, y=sq, mode="markers", marker=dict(color=ORANGE, size=4, opacity=0.7),
+                             showlegend=False, hovertemplate="theoretical %{x:.2f}, sample %{y:.2f}<extra></extra>"),
+                  row=1, col=2)
+    fig.add_trace(go.Scatter(x=[tq.min(), tq.max()], y=[slope * tq.min() + icpt, slope * tq.max() + icpt], mode="lines",
+                             line=dict(color=CYAN, dash="dash"), showlegend=False), row=1, col=2)
+    fig.update_xaxes(title_text="standardised residual", row=1, col=1)
+    fig.update_xaxes(title_text="theoretical quantile", row=1, col=2)
+    fig.update_yaxes(title_text="sample quantile", row=1, col=2)
+    return style(fig, title="Are the residuals roughly normal? (tails bending away from the line = heavy tails)", height=360)
+
+
+def horizon_fig(hz):
+    fig = go.Figure()
+    colors = {"SARIMA": ORANGE, "XGBoost": CYAN, "Seasonal naive": GREY}
+    for c in hz.columns:
+        fig.add_trace(go.Scatter(x=hz.index, y=hz[c], mode="lines+markers", name=c,
+                                 line=dict(color=colors.get(c, GREEN), width=2, dash="dash" if c == "Seasonal naive" else "solid"),
+                                 marker=dict(size=8)))
+    fig.update_xaxes(title_text="forecast horizon (days ahead)", dtick=1)
+    fig.update_yaxes(title_text="RMSE (sales)")
+    return style(fig, title=f"Forecast error by horizon ({hz.attrs.get('origins', '?')} rolling origins in the test period)",
+                 height=380)
+
+
+def k_cv_fig(cv):
+    summ, per = cv["summary"], cv["per_fold"]
+    best = cv["best"]
+    se = summ["SD"] / np.sqrt(summ["folds"].clip(lower=1))
+    fig = go.Figure()
+    for _, g in per.groupby("fold"):  # one faint line per fold: shows whether the ranking of K is consistent
+        fig.add_trace(go.Scatter(x=g["K"], y=g["RMSE"], mode="lines", line=dict(color=CYAN, width=1), opacity=0.35,
+                                 hoverinfo="skip", showlegend=False))
+    fig.add_trace(go.Scatter(x=summ["K"], y=summ["RMSE"], mode="lines+markers", name="Mean RMSE (5-day, CV)",
+                             line=dict(color=ORANGE, width=2.5), marker=dict(size=8, color=ORANGE),
+                             error_y=dict(type="data", array=se, color=GREY, thickness=1, width=4)))
+    b = summ[summ["K"] == best].iloc[0]
+    fig.add_trace(go.Scatter(x=[best], y=[b["RMSE"]], mode="markers", name=f"Lowest: K = {best}",
+                             marker=dict(size=15, color="rgba(0,0,0,0)", line=dict(color=TEXT, width=2))))
+    base = summ[summ["K"] == 0]
+    if len(base):
+        fig.add_hline(y=float(base["RMSE"].iloc[0]), line=dict(color=GREY, dash="dash", width=1),
+                      annotation_text="K = 0 (no yearly terms)", annotation_position="top right")
+    fig.update_xaxes(title_text="K (Fourier harmonic pairs)", dtick=1)
+    fig.update_yaxes(title_text="RMSE (sales)")
+    return style(fig, title="Forecast validation error vs K", height=400)

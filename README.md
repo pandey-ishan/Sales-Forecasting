@@ -26,7 +26,20 @@ automatically and shown on the Data tab.
 | 2 Univariate | Histogram, box plot, z-scores (threshold slider, log10 option), summary stats, candlestick of daily sales (week/month/quarter), categorical frequencies |
 | 3 Bivariate | Correlation heatmap (Pearson/Spearman, daily level incl. lag 1/7), category × category heatmap, box/violin by group with Kruskal-Wallis p-value, scatter with OLS fit, month × weekday heatmap |
 | 4 EDA | Bubble map (state or city), sunburst/treemap drill-down Category → Sub-Category → Product, sales over time with click-to-drill into a category's sub-categories, seasonality by year |
-| 5 Forecast | SARIMA vs XGBoost vs hybrid on a chronological 70/30 split, actual-vs-predicted plots, feature importance, next-5-day forecast |
+| 5 Forecast | Seven collapsible steps (below) from stationarity checks to the final 5-day forecast, on a chronological 70/30 split |
+
+## The Forecast tab, step by step
+
+| Step | What's in it |
+|---|---|
+| Setup | Target, log transform, outlier removal (z threshold, side) |
+| 1 Stationarity Analysis | Rolling mean / std, original vs differenced series, ADF and KPSS tests, suggested d and D. Needs statsmodels |
+| 2 Model Identification | p, q, P, Q, m inputs; ACF and PACF with the non-significant band shaded; periodogram |
+| 3 Feature Engineering | Yearly Fourier terms (K); lists the calendar / lag features. Holidays and promotions are not in the data |
+| 4 Model Estimation and Selection | Auto or manual order, Train & forecast, AIC / BIC heatmap over p and q, validation RMSE vs K (rolling CV), auto-ARIMA search table |
+| 5 Residual Diagnostics | Residuals over time, residual ACF, histogram and Q-Q plot, Ljung-Box test |
+| 6 Forecast Validation | MAE, RMSE, WAPE, MASE, R²; actual vs predicted; forecast error by horizon (1-5 days); feature importance |
+| 7 Final Model Fitting and Forecasting | Refit on all data, next 5 days with a 95% SARIMA interval |
 
 ## How the forecast works
 
@@ -41,7 +54,20 @@ automatically and shown on the Data tab.
   residuals.
 - The **5-day forecast** refits on all data. XGBoost uses one model per horizon (features lagged
   at least that many days), not recursion, because recursive forecasts drift in testing.
-- The default SARIMA order is (1,1,1)(1,1,1,7); edit the boxes on the Forecast tab to try others.
+- **Yearly Fourier terms (K)**: 0 = off. K > 0 adds K sine/cosine pairs of the day of year as SARIMA regressors and XGBoost features, a smooth yearly curve that works with m = 7 (SARIMA with m = 365 is impractical). Start with K = 2-3 and compare test RMSE with K = 0.
+- **Choose K plot** ("Compare K"): rolling-origin cross-validation of the 5-day SARIMA forecast for K = 0..K max, on the training 70% only, using the manual order and the pre-processing settings. Shows mean RMSE per K with error bars, one faint line per fold and the K = 0 baseline. Slow (one SARIMA fit per K per fold), so it's capped by 3x the time-limit box.
+- **ACF / PACF plots** above the model controls show the training series after the log/outlier settings and the d, D, m you type, with 95% bands and seasonal lags highlighted, to help pick manual p, q, P, Q.
+- **Pre-processing (on by default, each can be switched off and re-run to compare):**
+  - **log(1+sales)**: models are fitted on the log scale; predictions are converted back with Duan's
+    smearing factor (bounded to 0.5-2) so the back-transform doesn't under-state the mean.
+  - **Outlier removal**: training days with z > 3 on raw sales (the same z-score as the Univariate tab) are
+    removed. SARIMA sees them as missing values (days aren't deleted, so the weekly rhythm survives);
+    XGBoost drops them as training targets. Test days are never touched. The "Both" option also removes
+    unusually low days (z < -3). z uses the training mean/std only. After a log, zero-sales days make the
+    distribution left-skewed, so z > 3 would flag nothing; that's why the z-score is taken on raw sales.
+  - **Auto-ARIMA**: a custom stepwise AIC search (Hyndman-Khandakar style, not `pmdarima`): d from an ADF
+    test, D from seasonal strength, then p, q, P, Q around a few starting models, capped by a time limit.
+    Choose Manual to type an order instead.
 
 ## Things to know
 
